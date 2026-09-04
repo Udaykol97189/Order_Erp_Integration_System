@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from backend.app.odoo_client import odoo_client
 
@@ -36,4 +36,36 @@ def create_order(order: OrderCreate):
 def get_odoo_orders():
     return {
         "orders": odoo_client.search_orders()
+    }
+
+@app.get("/odoo/orders/{order_id}")
+def get_odoo_order(order_id: int):
+    order = odoo_client.get_order(order_id)
+
+    if order is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Order {order_id} not found"
+        )
+
+    return {
+        "order": order
+    }
+
+@app.put("/odoo/orders/{order_id}")
+def update_odoo_order(order_id: int, order: OrderCreate):
+    updated_order = odoo_client.update_order(
+        order_id,
+        order.model_dump()
+    )
+
+    if updated_order is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Order {order_id} not found"
+        )
+
+    return {
+        "message": "Order updated in Odoo",
+        "order": updated_order,
     }

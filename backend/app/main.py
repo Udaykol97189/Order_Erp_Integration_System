@@ -1,5 +1,7 @@
+from pydantic import BaseModel, EmailStr, Field
+from typing import Literal
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, EmailStr
+
 import httpx
 
 from backend.app.odoo_client import odoo_client
@@ -16,16 +18,44 @@ class OrderCreate(BaseModel):
     external_id: str
     customer_name: str
     customer_email: EmailStr | None = None
-    amount_total: float = 0.0
-    state: str = "draft"
+    amount_total: float = Field(default=0.0, ge=0)
+    state: Literal["draft", "confirmed", "cancelled"] = "draft"
 
+
+class OrderUpdate(BaseModel):
+    name: str
+    external_id: str
+    customer_name: str
+    customer_email: EmailStr | None = None
+    amount_total: float = Field(default=0.0, ge=0)
+    state: Literal["draft", "confirmed", "cancelled"] = "draft"
+
+
+class OrderResponse(BaseModel):
+    id: int
+    name: str
+    external_id: str
+    customer_name: str
+    customer_email: EmailStr | None = None
+    amount_total: float
+    state: Literal["draft", "confirmed", "cancelled"]
+    created_at: str
+    updated_at: str
+
+class OrderCreateResponse(BaseModel):
+    message: str
+    order: list[int]
+
+class OrderUpdateResponse(BaseModel):
+    message: str
+    order: OrderResponse
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
 
-@app.post("/orders")
+@app.post("/orders", response_model=OrderCreateResponse)
 def create_order(order: OrderCreate):
     try:
         created_order = odoo_client.create_order(
@@ -63,7 +93,7 @@ def get_odoo_orders():
         "orders": odoo_client.search_orders()
     }
 
-@app.get("/odoo/orders/{order_id}")
+@app.get("/odoo/orders/{order_id}", response_model=OrderResponse)
 def get_odoo_order(order_id: int):
     order = odoo_client.get_order(order_id)
 
@@ -73,12 +103,13 @@ def get_odoo_order(order_id: int):
             detail=f"Order {order_id} not found"
         )
 
-    return {
-        "order": order
-    }
+    return order
 
-@app.put("/odoo/orders/{order_id}")
-def update_odoo_order(order_id: int, order: OrderCreate):
+@app.put(
+    "/odoo/orders/{order_id}",
+    response_model=OrderUpdateResponse,
+)
+def update_odoo_order(order_id: int, order: OrderUpdate):
     try:
         updated_order = odoo_client.update_order(
             order_id,

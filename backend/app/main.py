@@ -1,6 +1,9 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+import httpx
+
 from backend.app.odoo_client import odoo_client
+
 
 app = FastAPI(
     title="Integrated Sales & Order Management API",
@@ -12,6 +15,8 @@ class OrderCreate(BaseModel):
     name: str
     external_id: str
     customer_name: str
+    customer_email: EmailStr | None = None
+    amount_total: float = 0.0
     state: str = "draft"
 
 
@@ -22,15 +27,35 @@ def health_check():
 
 @app.post("/orders")
 def create_order(order: OrderCreate):
-    created_order = odoo_client.create_order(
-        order.model_dump()
-    )
+    try:
+        created_order = odoo_client.create_order(
+            order.model_dump()
+        )
 
-    return {
-        "message": "Order created in Odoo",
-        "order": created_order,
-    }
+        return {
+            "message": "Order created in Odoo",
+            "order": created_order,
+        }
 
+    except httpx.HTTPStatusError as e:
+        error_text = e.response.text
+
+        if "unique" in error_text.lower() or "external_id" in error_text.lower():
+            raise HTTPException(
+                status_code=409,
+                detail="External Order ID already exists"
+            )
+
+        if "amount_non_negative" in error_text.lower():
+            raise HTTPException(
+                status_code=422,
+                detail="Order amount cannot be negative"
+            )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Odoo request failed"
+        )
 
 @app.get("/odoo/orders")
 def get_odoo_orders():
@@ -54,18 +79,39 @@ def get_odoo_order(order_id: int):
 
 @app.put("/odoo/orders/{order_id}")
 def update_odoo_order(order_id: int, order: OrderCreate):
-    updated_order = odoo_client.update_order(
-        order_id,
-        order.model_dump()
-    )
-
-    if updated_order is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Order {order_id} not found"
+    try:
+        updated_order = odoo_client.update_order(
+            order_id,
+            order.model_dump()
         )
 
-    return {
-        "message": "Order updated in Odoo",
-        "order": updated_order,
-    }
+        if updated_order is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Order {order_id} not found"
+            )
+
+        return {
+            "message": "Order updated in Odoo",
+            "order": updated_order,
+        }
+
+    except httpx.HTTPStatusError as e:
+        error_text = e.response.text
+
+        if "unique" in error_text.lower() or "external_id" in error_text.lower():
+            raise HTTPException(
+                status_code=409,
+                detail="External Order ID already exists"
+            )
+
+        if "amount_non_negative" in error_text.lower():
+            raise HTTPException(
+                status_code=422,
+                detail="Order amount cannot be negative"
+            )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Odoo request failed"
+        )
